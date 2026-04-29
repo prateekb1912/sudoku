@@ -1,12 +1,12 @@
-import React from 'react'
-import Grid from './components/Grid'
+import React from "react";
+import Grid from "./components/Grid";
 import {
   BrowserRouter as Router,
   Switch,
   Route,
-  Redirect
+  Redirect,
 } from "react-router-dom";
-import styled from "styled-components"
+import styled from "styled-components";
 
 let AppContainer = styled.div`
   display: flex;
@@ -38,54 +38,57 @@ let AppContainer = styled.div`
       outline: none;
     }
   }
-`
+`;
 
-let StyledLobbyInput = styled.input`
-
-`
+let StyledLobbyInput = styled.input``;
 
 class App extends React.Component {
   constructor(props) {
-    super(props)
+    super(props);
     this.state = {
       lobby: "",
-      redirect: false
-    }
-    this.handleInput = this.handleInput.bind(this)
-    this.handleKeyPress = this.handleKeyPress.bind(this)
+      redirect: false,
+    };
+    this.handleInput = this.handleInput.bind(this);
+    this.handleKeyPress = this.handleKeyPress.bind(this);
   }
 
   handleInput(e) {
     this.setState({
       lobby: e.target.value,
-      redirect: false
-    })
+      redirect: false,
+    });
   }
 
   handleKeyPress(e) {
-    if (e.key === "Enter") this.setState({redirect: true})
+    if (e.key === "Enter") this.setState({ redirect: true });
   }
 
   render() {
-    return <Router>
-      {this.state.redirect && <Redirect push to={"/" + this.state.lobby} />}
-      <div>
-        <Switch>
-          <Route path="/" exact={true}>
-            <AppContainer>
-              <h1>Sudoku</h1>
-              <div>
-                <p>Join a lobby</p>
-                <StyledLobbyInput onInput={this.handleInput} onKeyPress={this.handleKeyPress}/>
-              </div>
-            </AppContainer>
-          </Route>
-          <Route path="/*">
-            <Grid/>
-          </Route>
-        </Switch>
-      </div>
-    </Router>
+    return (
+      <Router>
+        {this.state.redirect && <Redirect push to={"/" + this.state.lobby} />}
+        <div>
+          <Switch>
+            <Route path="/" exact={true}>
+              <AppContainer>
+                <h1>Sudoku</h1>
+                <div>
+                  <p>Join a lobby</p>
+                  <StyledLobbyInput
+                    onInput={this.handleInput}
+                    onKeyDown={this.handleKeyPress}
+                  />
+                </div>
+              </AppContainer>
+            </Route>
+            <Route path="/*">
+              <Grid />
+            </Route>
+          </Switch>
+        </div>
+      </Router>
+    );
   }
 }
 
