@@ -548,6 +548,18 @@ function Players({ players, myId, myProgress, history }) {
             <PlayerRow key={p.id} isMe={isMe} finishRank={p.finishRank}>
               <PlayerHeader>
                 <span>
+                  <span
+                    title={p.disconnected ? "disconnected" : "online"}
+                    style={{
+                      display: "inline-block",
+                      width: "0.9vmin",
+                      height: "0.9vmin",
+                      borderRadius: "50%",
+                      background: p.disconnected ? "#e53935" : "#22c55e",
+                      marginRight: "0.5rem",
+                      verticalAlign: "middle",
+                    }}
+                  />
                   {p.isHost && (
                     <span
                       title="host"
@@ -557,7 +569,6 @@ function Players({ players, myId, myProgress, history }) {
                     </span>
                   )}
                   {p.name || "Anon"}
-                  {p.disconnected ? " (disconnected)" : ""}
                   {p.finishRank ? ` · #${p.finishRank}` : ""}
                   {p.finishMs != null ? ` · ${formatMs(p.finishMs)}` : ""}
                 </span>
@@ -661,17 +672,17 @@ export default function Grid() {
   }, [startedAt]);
 
   const togglePause = () => {
-    setPaused((p) => {
-      if (!p) {
-        pauseStartRef.current = Date.now();
-        return true;
-      }
+    if (!paused) {
+      pauseStartRef.current = Date.now();
+      setPaused(true);
+    } else {
       if (pauseStartRef.current != null) {
-        setPausedAccum((a) => a + (Date.now() - pauseStartRef.current));
+        const delta = Date.now() - pauseStartRef.current;
         pauseStartRef.current = null;
+        setPausedAccum((a) => a + delta);
       }
-      return false;
-    });
+      setPaused(false);
+    }
   };
 
   const frozenElapsedRef = useRef(null);
