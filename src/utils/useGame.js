@@ -65,6 +65,7 @@ export default function useGame(socket) {
 
   const solutionRef = useRef(null);
   const finishedRef = useRef(false);
+  const levelRef = useRef("medium");
 
   useEffect(() => {
     if (!socket) return;
@@ -90,8 +91,7 @@ export default function useGame(socket) {
     };
 
     const onNeedPuzzle = () => {
-      const level = localStorage.getItem("sudoku.difficulty") || "medium";
-      socket.emit("new game", generatePuzzle(level));
+      socket.emit("new game", generatePuzzle(levelRef.current));
     };
 
     socket.on("puzzle", onPuzzle);
@@ -153,5 +153,9 @@ export default function useGame(socket) {
     [board, originalBoard],
   );
 
-  return { board, originalBoard, difficulty, update, newGame, myProgress, finished, startedAt };
+  const setLevelRef = useCallback((lvl) => {
+    levelRef.current = lvl;
+  }, []);
+
+  return { board, originalBoard, difficulty, update, newGame, myProgress, finished, startedAt, setLevelRef };
 }

@@ -366,9 +366,7 @@ export default function Grid() {
   );
   const [draftName, setDraftName] = useState("");
 
-  const [level, setLevel] = useState(
-    () => localStorage.getItem("sudoku.difficulty") || "medium",
-  );
+  const [level, setLevel] = useState("medium");
 
   const { socket, connected, myId } = useSocket({ room, name });
   const {
@@ -380,7 +378,12 @@ export default function Grid() {
     myProgress,
     finished,
     startedAt,
+    setLevelRef,
   } = useGame(socket);
+
+  useEffect(() => {
+    setLevelRef(level);
+  }, [level, setLevelRef]);
   const { players, roundOver, nextRoundAt } = useRoom(socket);
   const isHost = players.some((p) => p.id === myId && p.isHost);
 
@@ -390,7 +393,6 @@ export default function Grid() {
     return () => clearInterval(id);
   }, []);
 
-  const elapsed = startedAt ? Math.max(0, now - startedAt) : 0;
   const countdown = nextRoundAt
     ? Math.max(0, Math.ceil((nextRoundAt - now) / 1000))
     : 0;
@@ -399,17 +401,64 @@ export default function Grid() {
     if (name) localStorage.setItem("sudoku.name", name);
   }, [name]);
 
-  useEffect(() => {
-    localStorage.setItem("sudoku.difficulty", level);
-  }, [level]);
-
   const [selectedIdx, setSelectedIdx] = useState(null);
   const [paused, setPaused] = useState(false);
+  const [pausedAccum, setPausedAccum] = useState(0);
+  const pauseStartRef = useRef(null);
 
-  // unpause automatically when a new round starts
+  // unpause and reset accumulator when a new round starts
   useEffect(() => {
-    if (startedAt) setPaused(false);
+    if (startedAt) {
+      setPaused(false);
+      setPausedAccum(0);
+      pauseStartRef.current = null;
+    }
   }, [startedAt]);
+
+  const togglePause = () => {
+    setPaused((p) => {
+      if (!p) {
+        pauseStartRef.current = Date.now();
+        return true;
+      }
+      if (pauseStartRef.current != null) {
+        setPausedAccum((a) => a + (Date.now() - pauseStartRef.current));
+        pauseStartRef.current = null;
+      }
+      return false;
+    });
+  };
+
+  const adjustedElapsed = startedAt
+    ? Math.max(
+        0,
+        now -
+          startedAt -
+          pausedAccum -
+          (paused && pauseStartRef.current != null
+            ? now - pauseStartRef.current
+            : 0),
+      )
+    : 0;
+
+  // emit finish with pause-adjusted elapsed exactly once per round
+  const finishEmittedRef = useRef(false);
+  useEffect(() => {
+    if (!startedAt) finishEmittedRef.current = false;
+  }, [startedAt]);
+  useEffect(() => {
+    if (finished && socket && !finishEmittedRef.current) {
+      finishEmittedRef.current = true;
+      const ongoingPause =
+        paused && pauseStartRef.current != null
+          ? Date.now() - pauseStartRef.current
+          : 0;
+      const elapsedMs = startedAt
+        ? Math.max(0, Date.now() - startedAt - pausedAccum - ongoingPause)
+        : 0;
+      socket.emit("finish", { elapsedMs });
+    }
+  }, [finished, socket, startedAt, pausedAccum, paused]);
 
   const updateAt = (idx, val) => {
     if (idx == null || finished || paused) return;
@@ -513,10 +562,10 @@ export default function Grid() {
       <BoardColumn>
         <ClockRow>
           <Clock running={!!startedAt && !roundOver && !finished && !paused}>
-            {startedAt ? formatMs(elapsed) : "0:00"}
+            {startedAt ? formatMs(adjustedElapsed) : "0:00"}
           </Clock>
           {!!startedAt && !roundOver && !finished && (
-            <PauseButton onClick={() => setPaused((p) => !p)}>
+            <PauseButton onClick={togglePause}>
               {paused ? (
                 <FontAwesomeIcon icon={faPlay} />
               ) : (

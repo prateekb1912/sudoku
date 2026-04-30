@@ -74,25 +74,32 @@ const roundInProgress = (room: Room) =>
   room.puzzle !== null && !allFinished(room);
 
 io.on("connection", (socket) => {
-  socket.on("join", ({ room: roomId, name }: { room: string; name: string }) => {
-    socket.join(roomId);
-    socket.data.room = roomId;
-    const room = getRoom(roomId);
-    if (!room.players.has(socket.id)) {
-      room.players.set(socket.id, {
-        id: socket.id,
-        name: String(name || "Anon").slice(0, 20),
-        progress: 0,
-        finishRank: null,
-        finishMs: null,
-        score: 0,
-      });
-    }
-    if (!room.hostId) room.hostId = socket.id;
-    if (room.puzzle) socket.emit("puzzle", { ...room.puzzle, startedAt: room.roundStartedAt });
-    else if (socket.id === room.hostId) socket.emit("need puzzle");
-    broadcastPlayers(roomId, room);
-  });
+  socket.on(
+    "join",
+    ({ room: roomId, name }: { room: string; name: string }) => {
+      socket.join(roomId);
+      socket.data.room = roomId;
+      const room = getRoom(roomId);
+      if (!room.players.has(socket.id)) {
+        room.players.set(socket.id, {
+          id: socket.id,
+          name: String(name || "Anon").slice(0, 20),
+          progress: 0,
+          finishRank: null,
+          finishMs: null,
+          score: 0,
+        });
+      }
+      if (!room.hostId) room.hostId = socket.id;
+      if (room.puzzle)
+        socket.emit("puzzle", {
+          ...room.puzzle,
+          startedAt: room.roundStartedAt,
+        });
+      else if (socket.id === room.hostId) socket.emit("need puzzle");
+      broadcastPlayers(roomId, room);
+    },
+  );
 
   socket.on("new game", (puzzle: Puzzle) => {
     const roomId = socket.data.room;
