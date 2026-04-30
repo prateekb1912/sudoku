@@ -115,13 +115,13 @@ const PauseButton = styled.button`
 
 const Pad = styled.div`
   display: grid;
-  grid-template-columns: repeat(10, 1fr);
+  grid-template-columns: repeat(11, 1fr);
   gap: 0.4vmin;
   margin-top: 1vmin;
   width: min(80vmin, 95vw);
 
   @media (max-width: 700px) {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     gap: 1.5vmin;
     margin-top: 2vmin;
   }
@@ -221,25 +221,32 @@ const NameGate = styled.form`
   }
 `;
 
-const PlayersPanel = styled.div`
+const SidePanels = styled.div`
   display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  min-width: 18vmin;
-  font-size: 1.8vmin;
+  flex-direction: row;
+  gap: 1rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
 `;
 
-const HistoryPanel = styled.div`
+const Panel = styled.div`
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
   min-width: 18vmin;
-  max-height: 60vh;
+  max-height: 70vh;
   overflow-y: auto;
+  padding: 0.6rem;
+  border: 1px solid #ddd;
+  border-radius: 0.5rem;
+`;
+
+const PlayersPanel = styled(Panel)`
+  font-size: 1.8vmin;
+`;
+
+const HistoryPanel = styled(Panel)`
   font-size: 1.6vmin;
-  margin-top: 1rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid #ddd;
 `;
 
 const HistoryRound = styled.div`
@@ -349,6 +356,180 @@ const formatMs = (ms) => {
   return `${m}:${String(s).padStart(2, "0")}`;
 };
 
+const LeaderboardOverlay = styled.div`
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 18, 5, 0.55);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  z-index: 1000;
+`;
+
+const LeaderboardCard = styled.div`
+  background: linear-gradient(180deg, #fff7d6 0%, #fff2bd 100%);
+  border: 1px solid #e6c97a;
+  border-radius: 1rem;
+  padding: 2rem 2.4rem;
+  width: min(560px, 92vw);
+  max-height: 92vh;
+  overflow-y: auto;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+`;
+
+const LeaderboardSubtitle = styled.div`
+  text-align: center;
+  font-size: 1.6vmin;
+  color: #806a2a;
+  margin-bottom: 1rem;
+`;
+
+const LeaderboardTitle = styled.div`
+  font-size: 2.4vmin;
+  font-weight: 800;
+  text-align: center;
+  letter-spacing: 0.05em;
+  color: #6b4d00;
+  margin-bottom: 0.9rem;
+`;
+
+const LeaderboardRow = styled.div`
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.5rem;
+  background: ${(p) =>
+    p.rank === 1
+      ? "rgba(255, 215, 0, 0.25)"
+      : p.rank === 2
+      ? "rgba(192, 192, 192, 0.22)"
+      : p.rank === 3
+      ? "rgba(205, 127, 50, 0.22)"
+      : "rgba(255, 255, 255, 0.45)"};
+  border: 1px solid
+    ${(p) =>
+      p.rank === 1
+        ? "#e6c000"
+        : p.rank === 2
+        ? "#b8b8b8"
+        : p.rank === 3
+        ? "#b87333"
+        : "#e8d999"};
+  outline: ${(p) => (p.isMe ? "2px solid #00AA4A" : "none")};
+  outline-offset: 2px;
+  margin-bottom: 0.4rem;
+`;
+
+const LbMedal = styled.div`
+  font-size: 2.4vmin;
+  font-weight: 800;
+  width: 2.6vmin;
+  text-align: center;
+`;
+
+const LbName = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+`;
+
+const LbPlayerName = styled.div`
+  font-size: 2vmin;
+  font-weight: 700;
+  color: #2a1f00;
+`;
+
+const LbStats = styled.div`
+  font-size: 1.4vmin;
+  color: #806a2a;
+`;
+
+const LbPoints = styled.div`
+  font-size: 2.4vmin;
+  font-weight: 800;
+  color: #6b4d00;
+`;
+
+const LbActions = styled.div`
+  display: flex;
+  justify-content: center;
+  margin-top: 0.9rem;
+`;
+
+function FinalLeaderboard({ players, history, myId, isHost, onStartNew }) {
+  const sorted = [...players].sort((a, b) => b.score - a.score);
+  const medal = (rank) =>
+    rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : `#${rank}`;
+  const winner = sorted[0];
+  return (
+    <LeaderboardOverlay>
+      <LeaderboardCard>
+        <LeaderboardTitle>FINAL LEADERBOARD</LeaderboardTitle>
+        {winner && (
+          <LeaderboardSubtitle>
+            {winner.name || "Anon"} wins with {winner.score} pts
+          </LeaderboardSubtitle>
+        )}
+        {sorted.map((p, i) => {
+          const rank = i + 1;
+          const isMe = p.id === myId;
+          const times = history
+            .flatMap((h) => h.results)
+            .filter((r) => r.playerId === p.id && r.finishMs != null)
+            .map((r) => r.finishMs);
+          const totalMs = times.reduce((a, b) => a + b, 0);
+          const bestMs = times.length ? Math.min(...times) : null;
+          const wins = history.filter(
+            (h) => h.results.find((r) => r.rank === 1)?.playerId === p.id,
+          ).length;
+          return (
+            <LeaderboardRow key={p.id} rank={rank} isMe={isMe}>
+              <LbMedal>{medal(rank)}</LbMedal>
+              <LbName>
+                <LbPlayerName>
+                  {p.name || "Anon"}
+                  {isMe && (
+                    <span
+                      style={{
+                        marginLeft: "0.5rem",
+                        fontSize: "1.4vmin",
+                        color: "#00AA4A",
+                        fontWeight: 600,
+                      }}
+                    >
+                      you
+                    </span>
+                  )}
+                </LbPlayerName>
+                {bestMs != null && (
+                  <LbStats>
+                    {wins} {wins === 1 ? "win" : "wins"} · best{" "}
+                    {formatMs(bestMs)} · total {formatMs(totalMs)}
+                  </LbStats>
+                )}
+              </LbName>
+              <LbPoints>{p.score}</LbPoints>
+            </LeaderboardRow>
+          );
+        })}
+        <LbActions>
+          {isHost ? (
+            <GameButton onClick={onStartNew}>Start new game</GameButton>
+          ) : (
+            <div style={{ color: "#806a2a", fontSize: "1.6vmin" }}>
+              Waiting for host to start a new game…
+            </div>
+          )}
+        </LbActions>
+      </LeaderboardCard>
+    </LeaderboardOverlay>
+  );
+}
+
 function Players({ players, myId, myProgress, history }) {
   const sorted = [...players].sort((a, b) => {
     if (a.finishRank && b.finishRank) return a.finishRank - b.finishRank;
@@ -357,39 +538,41 @@ function Players({ players, myId, myProgress, history }) {
     return b.progress - a.progress;
   });
   return (
-    <PlayersPanel>
-      <div style={{ fontWeight: 700, fontSize: "2.2vmin" }}>Players</div>
-      {sorted.map((p) => {
-        const isMe = p.id === myId;
-        const progress = isMe ? myProgress : p.progress;
-        const label = (p.name || "Anon") + (isMe ? " (you)" : "");
-        return (
-          <PlayerRow key={p.id} isMe={isMe} finishRank={p.finishRank}>
-            <PlayerHeader>
-              <span>
-                {p.isHost && (
-                  <span
-                    title="host"
-                    style={{ color: "#bbb", marginRight: "0.3rem" }}
-                  >
-                    ★
-                  </span>
-                )}
-                {label}
-                {p.finishRank ? ` · #${p.finishRank}` : ""}
-                {p.finishMs != null ? ` · ${formatMs(p.finishMs)}` : ""}
-              </span>
-              <span>{p.score} pts</span>
-            </PlayerHeader>
-            <ProgressBar>
-              <ProgressFill value={progress} isMe={isMe} />
-            </ProgressBar>
-            <div style={{ fontSize: "1.5vmin", color: "#888" }}>
-              {Math.round(progress * 100)}%
-            </div>
-          </PlayerRow>
-        );
-      })}
+    <SidePanels>
+      <PlayersPanel>
+        <div style={{ fontWeight: 700, fontSize: "2.2vmin" }}>Players</div>
+        {sorted.map((p) => {
+          const isMe = p.id === myId;
+          const progress = isMe ? myProgress : p.progress;
+          return (
+            <PlayerRow key={p.id} isMe={isMe} finishRank={p.finishRank}>
+              <PlayerHeader>
+                <span>
+                  {p.isHost && (
+                    <span
+                      title="host"
+                      style={{ color: "#bbb", marginRight: "0.3rem" }}
+                    >
+                      ★
+                    </span>
+                  )}
+                  {p.name || "Anon"}
+                  {p.disconnected ? " (disconnected)" : ""}
+                  {p.finishRank ? ` · #${p.finishRank}` : ""}
+                  {p.finishMs != null ? ` · ${formatMs(p.finishMs)}` : ""}
+                </span>
+                <span>{p.score} pts</span>
+              </PlayerHeader>
+              <ProgressBar>
+                <ProgressFill value={progress} isMe={isMe} />
+              </ProgressBar>
+              <div style={{ fontSize: "1.5vmin", color: "#888" }}>
+                {Math.round(progress * 100)}%
+              </div>
+            </PlayerRow>
+          );
+        })}
+      </PlayersPanel>
       {history && history.length > 0 && (
         <HistoryPanel>
           <div style={{ fontWeight: 700, fontSize: "1.8vmin" }}>
@@ -406,7 +589,6 @@ function Players({ players, myId, myProgress, history }) {
                     <HistoryRow key={r.playerId} isMe={isMe}>
                       <span>
                         #{r.rank} {r.name || "Anon"}
-                        {isMe ? " (you)" : ""}
                         {r.finishMs != null ? ` · ${formatMs(r.finishMs)}` : ""}
                       </span>
                       <span>+{r.points}</span>
@@ -417,7 +599,7 @@ function Players({ players, myId, myProgress, history }) {
           ))}
         </HistoryPanel>
       )}
-    </PlayersPanel>
+    </SidePanels>
   );
 }
 
@@ -612,9 +794,35 @@ export default function Grid() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [selectedIdx, board, originalBoard, finished, paused, update]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [notesMode, setNotesMode] = useState(false);
+  const notesModeRef = useRef(false);
+  useEffect(() => {
+    notesModeRef.current = notesMode;
+  }, [notesMode]);
+
   const padInput = (digit) => {
     if (selectedIdx == null) return;
-    updateAt(selectedIdx, digit);
+    const useNotes = notesModeRef.current && digit !== "";
+    if (devMode) {
+      // eslint-disable-next-line no-console
+      console.log("[padInput]", {
+        digit,
+        notesMode: notesModeRef.current,
+        useNotes,
+        selectedIdx,
+        cur: board[selectedIdx],
+      });
+    }
+    if (!useNotes) {
+      updateAt(selectedIdx, digit);
+      return;
+    }
+    const cur = board[selectedIdx];
+    const curNotes = Array.isArray(cur) ? cur : [];
+    const next = curNotes.includes(digit)
+      ? curNotes.filter((n) => n !== digit)
+      : [...curNotes, digit];
+    updateAt(selectedIdx, next.length ? next : "");
   };
 
   const remaining = (() => {
@@ -762,53 +970,13 @@ export default function Grid() {
           </Banner>
         )}
         {gameOver && (
-          <Banner style={{ background: "#fff8e1", borderColor: "#e6c97a" }}>
-            <div style={{ fontWeight: 700, marginBottom: "0.4rem" }}>
-              Final leaderboard
-            </div>
-            {[...players]
-              .sort((a, b) => b.score - a.score)
-              .map((p, i) => {
-                const isMe = p.id === myId;
-                const myTimes = history
-                  .flatMap((h) => h.results)
-                  .filter((r) => r.playerId === p.id && r.finishMs != null)
-                  .map((r) => r.finishMs);
-                const totalMs = myTimes.reduce((a, b) => a + b, 0);
-                const bestMs = myTimes.length ? Math.min(...myTimes) : null;
-                return (
-                  <div
-                    key={p.id}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: "1rem",
-                      fontWeight: isMe ? 700 : 400,
-                    }}
-                  >
-                    <span>
-                      #{i + 1} {p.name || "Anon"}
-                      {isMe ? " (you)" : ""}
-                      {bestMs != null && (
-                        <span style={{ color: "#888", fontWeight: 400 }}>
-                          {" "}
-                          · best {formatMs(bestMs)} · total{" "}
-                          {formatMs(totalMs)}
-                        </span>
-                      )}
-                    </span>
-                    <span>{p.score} pts</span>
-                  </div>
-                );
-              })}
-            {isHost && (
-              <div style={{ marginTop: "0.6rem" }}>
-                <GameButton onClick={() => socket?.emit("start game")}>
-                  Start new game
-                </GameButton>
-              </div>
-            )}
-          </Banner>
+          <FinalLeaderboard
+            players={players}
+            history={history}
+            myId={myId}
+            isHost={isHost}
+            onStartNew={() => socket?.emit("start game")}
+          />
         )}
         <GridContainer>
           {[...Array(9)].map((_, square) => (
@@ -855,6 +1023,17 @@ export default function Grid() {
             title="Clear cell"
           >
             ✕<PadCount>&nbsp;</PadCount>
+          </PadButton>
+          <PadButton
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setNotesMode((n) => !n)}
+            title="Toggle notes mode"
+            style={{
+              background: notesMode ? "#ffe9a8" : undefined,
+              borderColor: notesMode ? "#d4a017" : undefined,
+            }}
+          >
+            ✎<PadCount>{notesMode ? "on" : "off"}</PadCount>
           </PadButton>
         </Pad>
       </BoardColumn>

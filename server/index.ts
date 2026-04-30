@@ -13,13 +13,18 @@ const io = new Server(server, {
 });
 
 type Player = {
-  id: string;
+  id: string; // clientId
+  socketId: string | null;
   name: string;
   progress: number;
   finishRank: number | null;
   finishMs: number | null;
   score: number;
+  disconnectedAt: number | null;
+  pruneTimer: NodeJS.Timeout | null;
 };
+
+const RECONNECT_GRACE_MS = 30_000;
 
 type Puzzle = { originalBoard: any[]; difficulty: any };
 
@@ -74,8 +79,14 @@ const getRoom = (id: string): Room => {
 
 const roster = (room: Room) =>
   Array.from(room.players.values()).map((p) => ({
-    ...p,
+    id: p.id,
+    name: p.name,
+    progress: p.progress,
+    finishRank: p.finishRank,
+    finishMs: p.finishMs,
+    score: p.score,
     isHost: p.id === room.hostId,
+    disconnected: p.disconnectedAt !== null,
   }));
 
 const broadcastPlayers = (roomId: string, room: Room) => {
@@ -105,30 +116,60 @@ const finalizeRound = (roomId: string, room: Room) => {
   }
 };
 
+// Resolve a Player from the connected socket via its bound clientId.
+const playerFromSocket = (room: Room, socket: any): Player | undefined => {
+  const cid = socket.data?.clientId;
+  if (!cid) return undefined;
+  return room.players.get(cid);
+};
+
 io.on("connection", (socket) => {
   socket.on(
     "join",
-    ({ room: roomId, name }: { room: string; name: string }) => {
+    ({
+      room: roomId,
+      name,
+      clientId,
+    }: {
+      room: string;
+      name: string;
+      clientId: string;
+    }) => {
+      if (!clientId) return;
       socket.join(roomId);
       socket.data.room = roomId;
+      socket.data.clientId = clientId;
       const room = getRoom(roomId);
-      if (!room.players.has(socket.id)) {
-        room.players.set(socket.id, {
-          id: socket.id,
+      const existing = room.players.get(clientId);
+      if (existing) {
+        // reconnect: cancel any pending prune, rebind socket
+        if (existing.pruneTimer) {
+          clearTimeout(existing.pruneTimer);
+          existing.pruneTimer = null;
+        }
+        existing.disconnectedAt = null;
+        existing.socketId = socket.id;
+        if (name) existing.name = String(name).slice(0, 20);
+      } else {
+        room.players.set(clientId, {
+          id: clientId,
+          socketId: socket.id,
           name: String(name || "Anon").slice(0, 20),
           progress: 0,
           finishRank: null,
           finishMs: null,
           score: 0,
+          disconnectedAt: null,
+          pruneTimer: null,
         });
       }
-      if (!room.hostId) room.hostId = socket.id;
+      if (!room.hostId) room.hostId = clientId;
       if (room.puzzle && !room.gameOver)
         socket.emit("puzzle", {
           ...room.puzzle,
           startedAt: room.roundStartedAt,
         });
-      else if (socket.id === room.hostId && !room.gameOver)
+      else if (clientId === room.hostId && !room.gameOver)
         socket.emit("need puzzle");
       if (room.history.length) socket.emit("history", room.history);
       socket.emit("settings", room.settings);
@@ -141,7 +182,7 @@ io.on("connection", (socket) => {
     const roomId = socket.data.room;
     if (!roomId) return;
     const room = getRoom(roomId);
-    if (socket.id !== room.hostId) return;
+    if (socket.data.clientId !== room.hostId) return;
     // settings can only change before round 1 starts
     if (room.history.length > 0 || roundInProgress(room)) return;
     if (s && "totalRounds" in s) {
@@ -157,7 +198,7 @@ io.on("connection", (socket) => {
     const roomId = socket.data.room;
     if (!roomId) return;
     const room = getRoom(roomId);
-    if (socket.id !== room.hostId) return;
+    if (socket.data.clientId !== room.hostId) return;
     if (roundInProgress(room)) return;
     if (room.history.length === 0) return;
     if (room.nextRoundTimer) {
@@ -173,7 +214,7 @@ io.on("connection", (socket) => {
     const roomId = socket.data.room;
     if (!roomId) return;
     const room = getRoom(roomId);
-    if (socket.id !== room.hostId) return;
+    if (socket.data.clientId !== room.hostId) return;
     if (!room.gameOver) return;
     room.gameOver = false;
     room.puzzle = null;
@@ -196,7 +237,7 @@ io.on("connection", (socket) => {
     const roomId = socket.data.room;
     if (!roomId) return;
     const room = getRoom(roomId);
-    if (socket.id !== room.hostId) return; // only host starts rounds
+    if (socket.data.clientId !== room.hostId) return; // only host starts rounds
     if (room.gameOver) return;
     if (
       room.settings.totalRounds !== null &&
@@ -226,7 +267,7 @@ io.on("connection", (socket) => {
     const roomId = socket.data.room;
     if (!roomId) return;
     const room = getRoom(roomId);
-    const p = room.players.get(socket.id);
+    const p = playerFromSocket(room, socket);
     if (!p) return;
     p.progress = Math.max(0, Math.min(1, Number(progress) || 0));
     broadcastPlayers(roomId, room);
@@ -236,7 +277,7 @@ io.on("connection", (socket) => {
     const roomId = socket.data.room;
     if (!roomId) return;
     const room = getRoom(roomId);
-    const p = room.players.get(socket.id);
+    const p = playerFromSocket(room, socket);
     if (!p || p.finishRank !== null) return;
     room.finishedCount += 1;
     p.finishRank = room.finishedCount;
@@ -293,22 +334,37 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     const roomId = socket.data.room;
-    if (!roomId) return;
+    const clientId = socket.data.clientId;
+    if (!roomId || !clientId) return;
     const room = rooms.get(roomId);
     if (!room) return;
-    room.players.delete(socket.id);
-    if (room.players.size === 0) {
-      rooms.delete(roomId);
-      return;
-    }
-    if (room.hostId === socket.id) {
-      const next = room.players.keys().next().value ?? null;
-      room.hostId = next;
-      // if no puzzle yet, ask the new host to make one
-      if (!room.puzzle && next) io.to(next).emit("need puzzle");
-    }
+    const p = room.players.get(clientId);
+    if (!p) return;
+    // ignore stale disconnects from a previous socket — user already reconnected
+    if (p.socketId !== socket.id) return;
+    p.socketId = null;
+    p.disconnectedAt = Date.now();
+    if (p.pruneTimer) clearTimeout(p.pruneTimer);
+    p.pruneTimer = setTimeout(() => {
+      const stillThere = room.players.get(clientId);
+      if (!stillThere || stillThere.socketId) return; // reconnected
+      room.players.delete(clientId);
+      if (room.players.size === 0) {
+        rooms.delete(roomId);
+        return;
+      }
+      if (room.hostId === clientId) {
+        const next = room.players.keys().next().value ?? null;
+        room.hostId = next;
+        if (!room.puzzle && next) {
+          const nextSocketId = room.players.get(next)?.socketId;
+          if (nextSocketId) io.to(nextSocketId).emit("need puzzle");
+        }
+      }
+      broadcastPlayers(roomId, room);
+      if (allFinished(room)) finalizeRound(roomId, room);
+    }, RECONNECT_GRACE_MS);
     broadcastPlayers(roomId, room);
-    if (allFinished(room)) io.to(roomId).emit("round over");
   });
 });
 

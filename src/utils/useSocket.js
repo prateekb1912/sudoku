@@ -15,6 +15,19 @@ export const entryToBoard = (square, i) => {
   return row * 9 + col;
 };
 
+const getClientId = () => {
+  if (typeof window === "undefined") return null;
+  let id = localStorage.getItem("sudoku.clientId");
+  if (!id) {
+    id =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem("sudoku.clientId", id);
+  }
+  return id;
+};
+
 export default function useSocket({ room, name }) {
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
@@ -22,13 +35,20 @@ export default function useSocket({ room, name }) {
 
   useEffect(() => {
     if (!name) return;
-    const s = io(SERVER_URL, { transports: ["websocket"] });
+    const clientId = getClientId();
+    setMyId(clientId);
+    const s = io(SERVER_URL, {
+      transports: ["websocket"],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 3000,
+    });
     setSocket(s);
 
     s.on("connect", () => {
-      setMyId(s.id);
       setConnected(true);
-      s.emit("join", { room, name });
+      s.emit("join", { room, name, clientId });
     });
     s.on("disconnect", () => setConnected(false));
 
