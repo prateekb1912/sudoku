@@ -23,6 +23,16 @@ type Player = {
 
 type Puzzle = { originalBoard: any[]; difficulty: any };
 
+type RoundResult = {
+  playerId: string;
+  name: string;
+  rank: number;
+  finishMs: number | null;
+  points: number;
+};
+
+type Settings = { totalRounds: number | null }; // null = unlimited
+
 type Room = {
   puzzle: Puzzle | null;
   players: Map<string, Player>;
@@ -30,9 +40,11 @@ type Room = {
   hostId: string | null;
   roundStartedAt: number | null;
   nextRoundTimer: NodeJS.Timeout | null;
+  history: { round: number; results: RoundResult[] }[];
+  currentRoundResults: RoundResult[];
+  settings: Settings;
+  gameOver: boolean;
 };
-
-const AUTO_NEXT_ROUND_MS = 8000;
 
 const rooms = new Map<string, Room>();
 
@@ -50,6 +62,10 @@ const getRoom = (id: string): Room => {
       hostId: null,
       roundStartedAt: null,
       nextRoundTimer: null,
+      history: [],
+      currentRoundResults: [],
+      settings: { totalRounds: null },
+      gameOver: false,
     };
     rooms.set(id, r);
   }
@@ -73,6 +89,22 @@ const allFinished = (room: Room) =>
 const roundInProgress = (room: Room) =>
   room.puzzle !== null && !allFinished(room);
 
+const finalizeRound = (roomId: string, room: Room) => {
+  const roundNumber = room.history.length + 1;
+  room.history.push({ round: roundNumber, results: room.currentRoundResults });
+  io.to(roomId).emit("history", room.history);
+  const reachedLimit =
+    room.settings.totalRounds !== null &&
+    room.history.length >= room.settings.totalRounds;
+  if (reachedLimit) {
+    room.gameOver = true;
+    io.to(roomId).emit("round over", { nextRoundAt: null });
+    io.to(roomId).emit("game over");
+  } else {
+    io.to(roomId).emit("round over", { nextRoundAt: null });
+  }
+};
+
 io.on("connection", (socket) => {
   socket.on(
     "join",
@@ -91,21 +123,86 @@ io.on("connection", (socket) => {
         });
       }
       if (!room.hostId) room.hostId = socket.id;
-      if (room.puzzle)
+      if (room.puzzle && !room.gameOver)
         socket.emit("puzzle", {
           ...room.puzzle,
           startedAt: room.roundStartedAt,
         });
-      else if (socket.id === room.hostId) socket.emit("need puzzle");
+      else if (socket.id === room.hostId && !room.gameOver)
+        socket.emit("need puzzle");
+      if (room.history.length) socket.emit("history", room.history);
+      socket.emit("settings", room.settings);
+      if (room.gameOver) socket.emit("game over");
       broadcastPlayers(roomId, room);
     },
   );
+
+  socket.on("settings", (s: Partial<Settings>) => {
+    const roomId = socket.data.room;
+    if (!roomId) return;
+    const room = getRoom(roomId);
+    if (socket.id !== room.hostId) return;
+    // settings can only change before round 1 starts
+    if (room.history.length > 0 || roundInProgress(room)) return;
+    if (s && "totalRounds" in s) {
+      const n = s.totalRounds;
+      if (n === null) room.settings.totalRounds = null;
+      else if (typeof n === "number" && n >= 1 && n <= 50)
+        room.settings.totalRounds = Math.floor(n);
+    }
+    io.to(roomId).emit("settings", room.settings);
+  });
+
+  socket.on("end game", () => {
+    const roomId = socket.data.room;
+    if (!roomId) return;
+    const room = getRoom(roomId);
+    if (socket.id !== room.hostId) return;
+    if (roundInProgress(room)) return;
+    if (room.history.length === 0) return;
+    if (room.nextRoundTimer) {
+      clearTimeout(room.nextRoundTimer);
+      room.nextRoundTimer = null;
+    }
+    room.gameOver = true;
+    io.to(roomId).emit("game over");
+  });
+
+  socket.on("start game", () => {
+    // host resets after a finished game to start fresh
+    const roomId = socket.data.room;
+    if (!roomId) return;
+    const room = getRoom(roomId);
+    if (socket.id !== room.hostId) return;
+    if (!room.gameOver) return;
+    room.gameOver = false;
+    room.puzzle = null;
+    room.history = [];
+    room.currentRoundResults = [];
+    room.finishedCount = 0;
+    room.roundStartedAt = null;
+    for (const p of room.players.values()) {
+      p.score = 0;
+      p.progress = 0;
+      p.finishRank = null;
+      p.finishMs = null;
+    }
+    io.to(roomId).emit("history", room.history);
+    io.to(roomId).emit("game reset");
+    broadcastPlayers(roomId, room);
+  });
 
   socket.on("new game", (puzzle: Puzzle) => {
     const roomId = socket.data.room;
     if (!roomId) return;
     const room = getRoom(roomId);
     if (socket.id !== room.hostId) return; // only host starts rounds
+    if (room.gameOver) return;
+    if (
+      room.settings.totalRounds !== null &&
+      room.history.length >= room.settings.totalRounds
+    )
+      return;
     // ignore if a round is still in progress — prevents accidental resets
     if (roundInProgress(room)) return;
     if (room.nextRoundTimer) {
@@ -115,6 +212,7 @@ io.on("connection", (socket) => {
     room.puzzle = puzzle;
     room.finishedCount = 0;
     room.roundStartedAt = Date.now();
+    room.currentRoundResults = [];
     for (const p of room.players.values()) {
       p.progress = 0;
       p.finishRank = null;
@@ -152,18 +250,45 @@ io.on("connection", (socket) => {
         ? Math.min(reported, serverElapsed ?? reported)
         : serverElapsed;
     p.progress = 1;
-    p.score += pointsFor(p.finishRank, room.players.size);
+    const points = pointsFor(p.finishRank, room.players.size);
+    p.score += points;
+    room.currentRoundResults.push({
+      playerId: p.id,
+      name: p.name,
+      rank: p.finishRank,
+      finishMs: p.finishMs,
+      points,
+    });
     broadcastPlayers(roomId, room);
-    if (allFinished(room)) {
-      const startsAt = Date.now() + AUTO_NEXT_ROUND_MS;
-      io.to(roomId).emit("round over", { nextRoundAt: startsAt });
-      room.nextRoundTimer = setTimeout(() => {
-        room.nextRoundTimer = null;
-        if (room.hostId && room.players.has(room.hostId)) {
-          io.to(room.hostId).emit("need puzzle");
-        }
-      }, AUTO_NEXT_ROUND_MS);
+    if (allFinished(room)) finalizeRound(roomId, room);
+  });
+
+  socket.on("dev finish all", () => {
+    const roomId = socket.data.room;
+    if (!roomId) return;
+    const room = getRoom(roomId);
+    if (!roundInProgress(room)) return;
+    const serverElapsed = room.roundStartedAt
+      ? Date.now() - room.roundStartedAt
+      : 0;
+    for (const p of room.players.values()) {
+      if (p.finishRank !== null) continue;
+      room.finishedCount += 1;
+      p.finishRank = room.finishedCount;
+      p.finishMs = serverElapsed;
+      p.progress = 1;
+      const points = pointsFor(p.finishRank, room.players.size);
+      p.score += points;
+      room.currentRoundResults.push({
+        playerId: p.id,
+        name: p.name,
+        rank: p.finishRank,
+        finishMs: p.finishMs,
+        points,
+      });
     }
+    broadcastPlayers(roomId, room);
+    if (allFinished(room)) finalizeRound(roomId, room);
   });
 
   socket.on("disconnect", () => {

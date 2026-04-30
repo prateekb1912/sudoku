@@ -65,7 +65,6 @@ export default function useGame(socket) {
 
   const solutionRef = useRef(null);
   const finishedRef = useRef(false);
-  const levelRef = useRef("medium");
 
   useEffect(() => {
     if (!socket) return;
@@ -90,15 +89,9 @@ export default function useGame(socket) {
       socket.emit("progress", computeProgress(restored, originalBoard));
     };
 
-    const onNeedPuzzle = () => {
-      socket.emit("new game", generatePuzzle(levelRef.current));
-    };
-
     socket.on("puzzle", onPuzzle);
-    socket.on("need puzzle", onNeedPuzzle);
     return () => {
       socket.off("puzzle", onPuzzle);
-      socket.off("need puzzle", onNeedPuzzle);
     };
   }, [socket]);
 
@@ -148,14 +141,20 @@ export default function useGame(socket) {
     [socket],
   );
 
+  const autoSolve = useCallback(() => {
+    if (!socket || finishedRef.current) return;
+    const solution = solutionRef.current;
+    if (!solution) return;
+    setBoard(solution.slice());
+    socket.emit("progress", 1);
+    finishedRef.current = true;
+    setFinished(true);
+  }, [socket]);
+
   const myProgress = useMemo(
     () => computeProgress(board, originalBoard),
     [board, originalBoard],
   );
 
-  const setLevelRef = useCallback((lvl) => {
-    levelRef.current = lvl;
-  }, []);
-
-  return { board, originalBoard, difficulty, update, newGame, myProgress, finished, startedAt, setLevelRef };
+  return { board, originalBoard, difficulty, update, newGame, autoSolve, myProgress, finished, startedAt };
 }

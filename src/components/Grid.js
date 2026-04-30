@@ -229,6 +229,41 @@ const PlayersPanel = styled.div`
   font-size: 1.8vmin;
 `;
 
+const HistoryPanel = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 18vmin;
+  max-height: 60vh;
+  overflow-y: auto;
+  font-size: 1.6vmin;
+  margin-top: 1rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid #ddd;
+`;
+
+const HistoryRound = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #eee;
+  border-radius: 0.3rem;
+`;
+
+const HistoryTitle = styled.div`
+  font-weight: 600;
+  font-size: 1.5vmin;
+  color: #555;
+`;
+
+const HistoryRow = styled.div`
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-weight: ${(props) => (props.isMe ? 600 : 400)};
+`;
+
 const PlayerRow = styled.div`
   display: flex;
   flex-direction: column;
@@ -314,7 +349,7 @@ const formatMs = (ms) => {
   return `${m}:${String(s).padStart(2, "0")}`;
 };
 
-function Players({ players, myId, myProgress }) {
+function Players({ players, myId, myProgress, history }) {
   const sorted = [...players].sort((a, b) => {
     if (a.finishRank && b.finishRank) return a.finishRank - b.finishRank;
     if (a.finishRank) return -1;
@@ -355,6 +390,33 @@ function Players({ players, myId, myProgress }) {
           </PlayerRow>
         );
       })}
+      {history && history.length > 0 && (
+        <HistoryPanel>
+          <div style={{ fontWeight: 700, fontSize: "1.8vmin" }}>
+            Round history
+          </div>
+          {[...history].reverse().map((h) => (
+            <HistoryRound key={h.round}>
+              <HistoryTitle>Round {h.round}</HistoryTitle>
+              {[...h.results]
+                .sort((a, b) => a.rank - b.rank)
+                .map((r) => {
+                  const isMe = r.playerId === myId;
+                  return (
+                    <HistoryRow key={r.playerId} isMe={isMe}>
+                      <span>
+                        #{r.rank} {r.name || "Anon"}
+                        {isMe ? " (you)" : ""}
+                        {r.finishMs != null ? ` · ${formatMs(r.finishMs)}` : ""}
+                      </span>
+                      <span>+{r.points}</span>
+                    </HistoryRow>
+                  );
+                })}
+            </HistoryRound>
+          ))}
+        </HistoryPanel>
+      )}
     </PlayersPanel>
   );
 }
@@ -378,13 +440,14 @@ export default function Grid() {
     myProgress,
     finished,
     startedAt,
-    setLevelRef,
+    autoSolve,
   } = useGame(socket);
 
-  useEffect(() => {
-    setLevelRef(level);
-  }, [level, setLevelRef]);
-  const { players, roundOver, nextRoundAt } = useRoom(socket);
+  const devMode =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("dev");
+  const { players, roundOver, nextRoundAt, history, settings, gameOver } =
+    useRoom(socket);
   const isHost = players.some((p) => p.id === myId && p.isHost);
 
   const [now, setNow] = useState(() => Date.now());
@@ -429,7 +492,12 @@ export default function Grid() {
     });
   };
 
-  const adjustedElapsed = startedAt
+  const frozenElapsedRef = useRef(null);
+  useEffect(() => {
+    frozenElapsedRef.current = null;
+  }, [startedAt]);
+
+  const liveElapsed = startedAt
     ? Math.max(
         0,
         now -
@@ -441,21 +509,45 @@ export default function Grid() {
       )
     : 0;
 
+  if (finished && frozenElapsedRef.current == null) {
+    frozenElapsedRef.current = liveElapsed;
+  }
+
+  const adjustedElapsed =
+    finished && frozenElapsedRef.current != null
+      ? frozenElapsedRef.current
+      : liveElapsed;
+
   // emit finish with pause-adjusted elapsed exactly once per round
-  const finishEmittedRef = useRef(false);
+  // Track the startedAt the current `finished` flag belongs to.
+  // Only emit when `finished` flipped true within this round — not when
+  // a stale `finished=true` lingers across a round transition.
+  const finishedRoundRef = useRef(null);
+  const emittedRoundRef = useRef(null);
   useEffect(() => {
-    if (!startedAt) finishEmittedRef.current = false;
-  }, [startedAt]);
+    if (finished) {
+      if (finishedRoundRef.current == null) finishedRoundRef.current = startedAt;
+    } else {
+      finishedRoundRef.current = null;
+    }
+  }, [finished, startedAt]);
   useEffect(() => {
-    if (finished && socket && !finishEmittedRef.current) {
-      finishEmittedRef.current = true;
+    if (
+      finished &&
+      socket &&
+      startedAt &&
+      finishedRoundRef.current === startedAt &&
+      emittedRoundRef.current !== startedAt
+    ) {
+      emittedRoundRef.current = startedAt;
       const ongoingPause =
         paused && pauseStartRef.current != null
           ? Date.now() - pauseStartRef.current
           : 0;
-      const elapsedMs = startedAt
-        ? Math.max(0, Date.now() - startedAt - pausedAccum - ongoingPause)
-        : 0;
+      const elapsedMs = Math.max(
+        0,
+        Date.now() - startedAt - pausedAccum - ongoingPause,
+      );
       socket.emit("finish", { elapsedMs });
     }
   }, [finished, socket, startedAt, pausedAccum, paused]);
@@ -573,19 +665,61 @@ export default function Grid() {
               )}
             </PauseButton>
           )}
+          {devMode && !!startedAt && !roundOver && !finished && (
+            <GameButton
+              onClick={autoSolve}
+              style={{ fontSize: "1.4vmin" }}
+              title="Dev: auto-fill solution"
+            >
+              Auto-solve
+            </GameButton>
+          )}
+          {devMode && !!startedAt && !roundOver && (
+            <GameButton
+              onClick={() => socket?.emit("dev finish all")}
+              style={{ fontSize: "1.4vmin" }}
+              title="Dev: force-finish all players"
+            >
+              Force end
+            </GameButton>
+          )}
         </ClockRow>
         <ButtonContainer>
           <DifficultyIndicator>
             {difficulty !== "" ? "Difficulty: " + difficulty : ""}
           </DifficultyIndicator>
-          {roundOver && isHost && (
+          {(!startedAt || roundOver) && isHost && !gameOver && (
             <div
               style={{
                 display: "inline-flex",
                 alignItems: "center",
                 gap: "0.5rem",
+                flexWrap: "wrap",
               }}
             >
+              {history.length === 0 && !startedAt && (
+                <select
+                  value={
+                    settings.totalRounds === null
+                      ? "unlimited"
+                      : String(settings.totalRounds)
+                  }
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    socket?.emit("settings", {
+                      totalRounds: v === "unlimited" ? null : Number(v),
+                    });
+                  }}
+                  style={{ fontSize: "1.8vmin" }}
+                  title="Number of rounds"
+                >
+                  <option value="unlimited">Unlimited</option>
+                  <option value="1">1 round</option>
+                  <option value="3">3 rounds</option>
+                  <option value="5">5 rounds</option>
+                  <option value="10">10 rounds</option>
+                </select>
+              )}
               <select
                 value={level}
                 onChange={(e) => setLevel(e.target.value)}
@@ -595,12 +729,21 @@ export default function Grid() {
                 <option value="medium">Medium</option>
                 <option value="hard">Hard</option>
               </select>
-              <GameButton onClick={() => newGame(level)}>New round</GameButton>
+              <GameButton onClick={() => newGame(level)}>
+                {roundOver ? "New round" : "Start round"}
+              </GameButton>
+              {roundOver && settings.totalRounds === null && (
+                <GameButton onClick={() => socket?.emit("end game")}>
+                  End game
+                </GameButton>
+              )}
             </div>
           )}
-          {roundOver && !isHost && (
+          {(!startedAt || roundOver) && !isHost && !gameOver && (
             <DifficultyIndicator>
-              Waiting for host to start the next round…
+              Waiting for host to start the {roundOver ? "next " : ""}round…
+              {settings.totalRounds !== null &&
+                ` (round ${history.length + 1} of ${settings.totalRounds})`}
             </DifficultyIndicator>
           )}
         </ButtonContainer>
@@ -612,10 +755,59 @@ export default function Grid() {
             Board is full but something's wrong — check your numbers.
           </Banner>
         )}
-        {roundOver && (
+        {roundOver && !gameOver && (
           <Banner>
             Round over.
             {nextRoundAt ? ` Next round in ${countdown}s…` : ""}
+          </Banner>
+        )}
+        {gameOver && (
+          <Banner style={{ background: "#fff8e1", borderColor: "#e6c97a" }}>
+            <div style={{ fontWeight: 700, marginBottom: "0.4rem" }}>
+              Final leaderboard
+            </div>
+            {[...players]
+              .sort((a, b) => b.score - a.score)
+              .map((p, i) => {
+                const isMe = p.id === myId;
+                const myTimes = history
+                  .flatMap((h) => h.results)
+                  .filter((r) => r.playerId === p.id && r.finishMs != null)
+                  .map((r) => r.finishMs);
+                const totalMs = myTimes.reduce((a, b) => a + b, 0);
+                const bestMs = myTimes.length ? Math.min(...myTimes) : null;
+                return (
+                  <div
+                    key={p.id}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: "1rem",
+                      fontWeight: isMe ? 700 : 400,
+                    }}
+                  >
+                    <span>
+                      #{i + 1} {p.name || "Anon"}
+                      {isMe ? " (you)" : ""}
+                      {bestMs != null && (
+                        <span style={{ color: "#888", fontWeight: 400 }}>
+                          {" "}
+                          · best {formatMs(bestMs)} · total{" "}
+                          {formatMs(totalMs)}
+                        </span>
+                      )}
+                    </span>
+                    <span>{p.score} pts</span>
+                  </div>
+                );
+              })}
+            {isHost && (
+              <div style={{ marginTop: "0.6rem" }}>
+                <GameButton onClick={() => socket?.emit("start game")}>
+                  Start new game
+                </GameButton>
+              </div>
+            )}
           </Banner>
         )}
         <GridContainer>
@@ -666,7 +858,12 @@ export default function Grid() {
           </PadButton>
         </Pad>
       </BoardColumn>
-      <Players players={players} myId={myId} myProgress={myProgress} />
+      <Players
+        players={players}
+        myId={myId}
+        myProgress={myProgress}
+        history={history}
+      />
     </AppContainer>
   );
 }
