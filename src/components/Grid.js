@@ -4,7 +4,7 @@ import useSocket, { entryToBoard } from "../utils/useSocket";
 import useGame from "../utils/useGame";
 import useRoom from "../utils/useRoom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faPause, faPlay } from "@fortawesome/free-solid-svg-icons";
+import { faPause, faPlay, faEraser } from "@fortawesome/free-solid-svg-icons";
 
 const AppContainer = styled.div`
   display: flex;
@@ -21,6 +21,7 @@ const AppContainer = styled.div`
     justify-content: flex-start;
     gap: 1.5vmin;
     padding: 1vmin;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 50vw);
     min-height: unset;
   }
 `;
@@ -61,10 +62,15 @@ const GridContainer = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   grid-template-rows: 1fr 1fr 1fr;
-  border: 2px solid black;
+  border: none;
   width: min(80vmin, 95vw);
   height: min(80vmin, 95vw);
   margin: 0 auto;
+
+  @media (max-width: 700px) {
+    width: min(99vw, 55vh);
+    height: min(99vw, 55vh);
+  }
 `;
 
 const PauseOverlay = styled.div`
@@ -121,9 +127,23 @@ const Pad = styled.div`
   width: min(80vmin, 95vw);
 
   @media (max-width: 700px) {
-    grid-template-columns: repeat(6, 1fr);
-    gap: 1.5vmin;
-    margin-top: 2vmin;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 2vw);
+    width: 100vw;
+    margin-top: 0;
+    padding: 0 3vw;
+    box-sizing: border-box;
+    grid-template-columns: repeat(5, 1fr);
+    grid-auto-rows: 1fr;
+    gap: 2vw;
+    justify-items: center;
+    z-index: 5;
+
+    .notes-inline {
+      display: none;
+    }
   }
 `;
 
@@ -144,9 +164,81 @@ const PadButton = styled.button`
   }
 
   @media (max-width: 700px) {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    padding: 0;
+    font-size: 7vw;
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+`;
+
+const NotesToggleFloating = styled.button`
+  display: none;
+
+  @media (max-width: 700px) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 44vw);
+    width: 13vw;
+    height: 13vw;
+    border-radius: 50%;
+    border: 1px solid #ccc;
+    background: ${(props) => (props.active ? "#d6e6fb" : "white")};
+    border-color: ${(props) => (props.active ? "#3b82f6" : "#ccc")};
     font-size: 6vw;
-    padding: 2.5vw 0;
-    border-radius: 0.5rem;
+    cursor: pointer;
+    z-index: 6;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  }
+`;
+
+const PreRoundOverlay = styled.div`
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  padding: 4vmin;
+`;
+
+const PreRoundCard = styled.div`
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.8rem;
+  padding: 3vmin 4vmin;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5vmin;
+  font-size: 2vmin;
+
+  select,
+  button {
+    font-size: 2vmin;
+  }
+
+  @media (max-width: 700px) {
+    padding: 5vw 6vw;
+    gap: 4vw;
+    font-size: 4vw;
+
+    select,
+    button {
+      font-size: 4vw;
+    }
   }
 `;
 
@@ -163,21 +255,45 @@ const PadCount = styled.span`
 `;
 
 const Square = styled.div`
-  border-top: ${(props) => (props.i / 3 >= 1 ? "2px solid black" : "")};
-  border-left: ${(props) => (props.i % 3 > 0 ? "2px solid black" : "")};
+  border-top: ${(props) => (props.i / 3 >= 1 ? "1px solid #6ea5cf" : "")};
+  border-left: ${(props) => (props.i % 3 > 0 ? "1px solid #6ea5cf" : "")};
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   grid-template-rows: 1fr 1fr 1fr;
 `;
 
 const StyledCell = styled.div`
-  border-top: ${(props) => (props.i / 3 >= 1 ? "1px solid #aaa" : "")};
-  border-left: ${(props) => (props.i % 3 > 0 ? "1px solid #aaa" : "")};
+  border-top: none;
+  border-left: none;
+  position: relative;
   display: flex;
+
+  &::after {
+    content: "";
+    position: absolute;
+    left: 18%;
+    right: 18%;
+    bottom: 6%;
+    height: 1px;
+    background: #d8dde3;
+    display: ${(props) => (Math.floor(props.i / 3) === 2 ? "none" : "block")};
+  }
+
+  &::before {
+    content: "";
+    position: absolute;
+    top: 18%;
+    bottom: 18%;
+    right: 6%;
+    width: 1px;
+    background: #d8dde3;
+    display: ${(props) => (props.i % 3 === 2 ? "none" : "block")};
+  }
   align-items: center;
   justify-content: center;
   text-align: center;
-  color: ${(props) => (props.isOriginal ? "black" : "#75aadb")};
+  color: ${(props) => (props.isOriginal ? "#4a4a4a" : "#7a7a7a")};
+  font-weight: 400;
   font-size: 4vmin;
   user-select: none;
   cursor: ${(props) => (props.isOriginal ? "default" : "pointer")};
@@ -194,11 +310,15 @@ const NotesGrid = styled.div`
   grid-template-rows: 1fr 1fr 1fr;
   width: 100%;
   height: 100%;
-  font-size: 1.6vmin;
+  font-size: 2vmin;
   line-height: 1;
-  color: #888;
+  color: #6b7a90;
   text-align: center;
   place-items: center;
+
+  @media (max-width: 700px) {
+    font-size: 2.6vw;
+  }
 `;
 
 const NameGate = styled.form`
@@ -239,6 +359,13 @@ const Panel = styled.div`
   padding: 0.6rem;
   border: 1px solid #ddd;
   border-radius: 0.5rem;
+  background: white;
+
+  @media (max-width: 700px) {
+    width: 92vw;
+    min-width: 0;
+    max-height: 35vh;
+  }
 `;
 
 const PlayersPanel = styled(Panel)`
@@ -317,8 +444,8 @@ const Banner = styled.div`
   margin: 0.5rem 0;
   padding: 0.5rem;
   text-align: center;
-  background: #fffbe5;
-  border: 1px solid #e6dca0;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
   border-radius: 0.4rem;
   font-size: 2vmin;
 `;
@@ -369,8 +496,8 @@ const LeaderboardOverlay = styled.div`
 `;
 
 const LeaderboardCard = styled.div`
-  background: linear-gradient(180deg, #fff7d6 0%, #fff2bd 100%);
-  border: 1px solid #e6c97a;
+  background: white;
+  border: 1px solid #e5e7eb;
   border-radius: 1rem;
   padding: 2rem 2.4rem;
   width: min(560px, 92vw);
@@ -406,19 +533,19 @@ const LeaderboardRow = styled.div`
     p.rank === 1
       ? "rgba(255, 215, 0, 0.25)"
       : p.rank === 2
-      ? "rgba(192, 192, 192, 0.22)"
-      : p.rank === 3
-      ? "rgba(205, 127, 50, 0.22)"
-      : "rgba(255, 255, 255, 0.45)"};
+        ? "rgba(192, 192, 192, 0.22)"
+        : p.rank === 3
+          ? "rgba(205, 127, 50, 0.22)"
+          : "rgba(255, 255, 255, 0.45)"};
   border: 1px solid
     ${(p) =>
       p.rank === 1
         ? "#e6c000"
         : p.rank === 2
-        ? "#b8b8b8"
-        : p.rank === 3
-        ? "#b87333"
-        : "#e8d999"};
+          ? "#b8b8b8"
+          : p.rank === 3
+            ? "#b87333"
+            : "#e8d999"};
   outline: ${(p) => (p.isMe ? "2px solid #00AA4A" : "none")};
   outline-offset: 2px;
   margin-bottom: 0.4rem;
@@ -719,7 +846,8 @@ export default function Grid() {
   const emittedRoundRef = useRef(null);
   useEffect(() => {
     if (finished) {
-      if (finishedRoundRef.current == null) finishedRoundRef.current = startedAt;
+      if (finishedRoundRef.current == null)
+        finishedRoundRef.current = startedAt;
     } else {
       finishedRoundRef.current = null;
     }
@@ -907,64 +1035,6 @@ export default function Grid() {
           <DifficultyIndicator>
             {difficulty !== "" ? "Difficulty: " + difficulty : ""}
           </DifficultyIndicator>
-          {(!startedAt || roundOver) && isHost && !gameOver && (
-            <div
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                flexWrap: "wrap",
-              }}
-            >
-              {history.length === 0 && !startedAt && (
-                <select
-                  value={
-                    settings.totalRounds === null
-                      ? "unlimited"
-                      : String(settings.totalRounds)
-                  }
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    socket?.emit("settings", {
-                      totalRounds: v === "unlimited" ? null : Number(v),
-                    });
-                  }}
-                  style={{ fontSize: "1.8vmin" }}
-                  title="Number of rounds"
-                >
-                  <option value="unlimited">Unlimited</option>
-                  <option value="1">1 round</option>
-                  <option value="3">3 rounds</option>
-                  <option value="5">5 rounds</option>
-                  <option value="10">10 rounds</option>
-                </select>
-              )}
-              <select
-                value={level}
-                onChange={(e) => setLevel(e.target.value)}
-                style={{ fontSize: "1.8vmin" }}
-              >
-                <option value="easy">Easy</option>
-                <option value="medium">Medium</option>
-                <option value="hard">Hard</option>
-              </select>
-              <GameButton onClick={() => newGame(level)}>
-                {roundOver ? "New round" : "Start round"}
-              </GameButton>
-              {roundOver && settings.totalRounds === null && (
-                <GameButton onClick={() => socket?.emit("end game")}>
-                  End game
-                </GameButton>
-              )}
-            </div>
-          )}
-          {(!startedAt || roundOver) && !isHost && !gameOver && (
-            <DifficultyIndicator>
-              Waiting for host to start the {roundOver ? "next " : ""}round…
-              {settings.totalRounds !== null &&
-                ` (round ${history.length + 1} of ${settings.totalRounds})`}
-            </DifficultyIndicator>
-          )}
         </ButtonContainer>
         {finished && !roundOver && (
           <Banner>You finished! Waiting for the others...</Banner>
@@ -1015,6 +1085,95 @@ export default function Grid() {
               </ResumeButton>
             </PauseOverlay>
           )}
+          {(!startedAt || roundOver) && !gameOver && (
+            <PreRoundOverlay>
+              <PreRoundCard>
+                {isHost ? (
+                  <>
+                    <div style={{ fontWeight: 600 }}>
+                      {roundOver ? "Round over" : "Ready to play?"}
+                    </div>
+                    {history.length === 0 && !startedAt && (
+                      <label
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.6rem",
+                        }}
+                      >
+                        Rounds:
+                        <select
+                          value={
+                            settings.totalRounds === null
+                              ? "unlimited"
+                              : String(settings.totalRounds)
+                          }
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            socket?.emit("settings", {
+                              totalRounds: v === "unlimited" ? null : Number(v),
+                            });
+                          }}
+                          title="Number of rounds"
+                        >
+                          <option value="unlimited">Unlimited</option>
+                          <option value="1">1 round</option>
+                          <option value="3">3 rounds</option>
+                          <option value="5">5 rounds</option>
+                          <option value="10">10 rounds</option>
+                        </select>
+                      </label>
+                    )}
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.6rem",
+                      }}
+                    >
+                      Difficulty:
+                      <select
+                        value={level}
+                        onChange={(e) => setLevel(e.target.value)}
+                      >
+                        <option value="easy">Easy</option>
+                        <option value="medium">Medium</option>
+                        <option value="hard">Hard</option>
+                      </select>
+                    </label>
+                    <GameButton
+                      onClick={() => newGame(level)}
+                      style={{
+                        background: "#3b82f6",
+                        color: "white",
+                        border: "1px solid #2563eb",
+                        borderRadius: "0.4rem",
+                        padding: "0.5rem 1.2rem",
+                        margin: 0,
+                      }}
+                    >
+                      {roundOver ? "New round" : "Start round"}
+                    </GameButton>
+                    {roundOver && settings.totalRounds === null && (
+                      <GameButton onClick={() => socket?.emit("end game")}>
+                        End game
+                      </GameButton>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ textAlign: "center" }}>
+                    Waiting for host to start the {roundOver ? "next " : ""}
+                    round…
+                    {settings.totalRounds !== null && (
+                      <div style={{ marginTop: "0.5rem", color: "#888" }}>
+                        Round {history.length + 1} of {settings.totalRounds}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </PreRoundCard>
+            </PreRoundOverlay>
+          )}
         </GridContainer>
         <Pad>
           {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
@@ -1033,20 +1192,30 @@ export default function Grid() {
             onClick={() => padInput("")}
             title="Clear cell"
           >
-            ✕<PadCount>&nbsp;</PadCount>
+            <FontAwesomeIcon icon={faEraser} />
+            <PadCount>&nbsp;</PadCount>
           </PadButton>
           <PadButton
+            className="notes-inline"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => setNotesMode((n) => !n)}
             title="Toggle notes mode"
             style={{
-              background: notesMode ? "#ffe9a8" : undefined,
-              borderColor: notesMode ? "#d4a017" : undefined,
+              background: notesMode ? "#d6e6fb" : undefined,
+              borderColor: notesMode ? "#3b82f6" : undefined,
             }}
           >
             ✎<PadCount>{notesMode ? "on" : "off"}</PadCount>
           </PadButton>
         </Pad>
+        <NotesToggleFloating
+          active={notesMode}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setNotesMode((n) => !n)}
+          title="Toggle notes mode"
+        >
+          ✎
+        </NotesToggleFloating>
       </BoardColumn>
       <Players
         players={players}
