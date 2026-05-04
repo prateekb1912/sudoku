@@ -304,6 +304,27 @@ const StyledCell = styled.div`
   }
 `;
 
+const CellHighlight = styled.span`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6em;
+  height: 1.6em;
+  border-radius: 50%;
+  background: ${(props) =>
+    props.variant === "selected"
+      ? "#3b82f6"
+      : props.variant === "empty"
+      ? "#d6e6fb"
+      : "#c8ccd2"};
+  color: ${(props) =>
+    props.variant === "selected"
+      ? "white"
+      : props.variant === "empty"
+      ? "transparent"
+      : "#4a4a4a"};
+`;
+
 const NotesGrid = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
@@ -450,18 +471,20 @@ const Banner = styled.div`
   font-size: 2vmin;
 `;
 
-function Cell({ value, idx, i, isOriginal, isSelected, onSelect }) {
+function Cell({ value, idx, i, isOriginal, isSelected, isMatch, onSelect }) {
   const isNotes = Array.isArray(value);
+  const hasDigit = !isNotes && value !== "" && value != null;
+  let variant = null;
+  if (!isNotes) {
+    if (isSelected && hasDigit) variant = "selected";
+    else if (isSelected) variant = "empty";
+    else if (isMatch) variant = "match";
+  }
   return (
     <StyledCell
       i={i}
       onClick={() => onSelect(idx)}
       isOriginal={isOriginal}
-      style={
-        isSelected
-          ? { outline: "2px solid #75aadb", outlineOffset: "-2px", zIndex: 1 }
-          : undefined
-      }
     >
       {isNotes ? (
         <NotesGrid>
@@ -469,6 +492,8 @@ function Cell({ value, idx, i, isOriginal, isSelected, onSelect }) {
             <div key={n}>{value.includes(String(n + 1)) ? n + 1 : ""}</div>
           ))}
         </NotesGrid>
+      ) : variant ? (
+        <CellHighlight variant={variant}>{hasDigit ? value : " "}</CellHighlight>
       ) : (
         value
       )}
@@ -1060,24 +1085,44 @@ export default function Grid() {
           />
         )}
         <GridContainer>
-          {[...Array(9)].map((_, square) => (
-            <Square key={square} i={square}>
-              {[...Array(9)].map((_, i) => {
-                const idx = entryToBoard(square, i);
-                return (
-                  <Cell
-                    key={i}
-                    i={i}
-                    idx={idx}
-                    value={board[idx]}
-                    isOriginal={originalBoard[idx] !== ""}
-                    isSelected={selectedIdx === idx}
-                    onSelect={paused ? () => {} : setSelectedIdx}
-                  />
-                );
-              })}
-            </Square>
-          ))}
+          {(() => {
+            const selVal =
+              selectedIdx != null && !Array.isArray(board[selectedIdx])
+                ? board[selectedIdx]
+                : "";
+            return [...Array(9)].map((_, square) => (
+              <Square key={square} i={square}>
+                {[...Array(9)].map((_, i) => {
+                  const idx = entryToBoard(square, i);
+                  const v = board[idx];
+                  const isMatch =
+                    selVal !== "" &&
+                    idx !== selectedIdx &&
+                    !Array.isArray(v) &&
+                    v === selVal;
+                  return (
+                    <Cell
+                      key={i}
+                      i={i}
+                      idx={idx}
+                      value={v}
+                      isOriginal={originalBoard[idx] !== ""}
+                      isSelected={selectedIdx === idx}
+                      isMatch={isMatch}
+                      onSelect={
+                        paused
+                          ? () => {}
+                          : (clickedIdx) =>
+                              setSelectedIdx((cur) =>
+                                cur === clickedIdx ? null : clickedIdx
+                              )
+                      }
+                    />
+                  );
+                })}
+              </Square>
+            ));
+          })()}
           {paused && (
             <PauseOverlay>
               <ResumeButton onClick={() => setPaused(false)}>
